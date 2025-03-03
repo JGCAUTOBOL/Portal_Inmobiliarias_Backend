@@ -1,0 +1,24 @@
+# Dependencias
+node_modules/
+npm-debug.log
+
+# Archivos de Entorno
+.env
+
+# Logs y Carpetas Temporales
+logs/
+*.log
+tmp/
+
+# IDEs y Configuraciones Locales
+.vscode/
+.idea/
+*.code-workspace
+
+# Archivos Binarios
+*.exe
+*.dll
+*.jar
+
+# Otros
+.DS_Store
