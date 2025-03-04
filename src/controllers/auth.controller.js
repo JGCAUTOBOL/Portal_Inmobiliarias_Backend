@@ -1,12 +1,11 @@
 const solicitudService = require('../services/solicitud.service');
 const googleSheetsService = require('../services/google-sheets.service');
+const GmailService = require('../services/gmail.service');
 const jwt = require('jsonwebtoken');
-const CODE = 'jshhsbshs6767ahhh'; // Código fijo
 const secretKey = 'g6E]=wfb&yH-2L>n`A9KN%';
 
 exports.validateEmail = async(req, res) => {
   const { email } = req.body;
-  // Validación simple de correo electrónico
   if (!email || !email.includes('@')) {
     return res.status(400).json({ message: 'Correo inválido' });
   }
@@ -15,8 +14,15 @@ exports.validateEmail = async(req, res) => {
   try {
     const response = await googleSheetsService.validateEmail(email);
     if (response.status === 'Access') {
-      req.session.email = email; // Guarda el correo en la sesión
-      req.session.poliza = response.poliza; // Guarda la póliza en la sesión
+      const subject = 'Tu Código OTP';
+      const CODE = generateOTP();
+      const expiryTime = calculateExpiryTime();
+      const htmlContent = GmailService.generateEmailHTML(CODE);
+      await GmailService.sendEmail(email, subject, htmlContent);
+      req.session.code = CODE;
+      req.session.expiryTime = expiryTime;
+      req.session.email = email;
+      req.session.poliza = response.poliza;
       req.session.nombre = response.nombre;
       return res.json({
         message: 'Access',
@@ -38,28 +44,43 @@ exports.validateCode = (req, res) => {
     return res.status(400).json({ message: 'Sesión inválida o código requerido' });
   }
 
-  if (code === CODE) {
+  const storedCode = req.session.code;
+  const expiryTimeString = req.session.expiryTime;
+
+  if (!storedCode || !expiryTimeString) {
+    return res.status(400).json({ message: 'Código OTP no generado o expirado' });
+  }
+
+  const expiryTime = new Date(expiryTimeString);
+  const now = new Date();
+  if (now > expiryTime) {
+    return res.status(400).json({ message: 'El código OTP ha expirado' });
+  }
+
+  if (code === storedCode) {
     req.session.isAuthenticated = true;
     const token = jwt.sign(
-      { email: req.session.email }, // Datos del usuario
-      secretKey, // Clave secreta (usa una clave segura en producción)
-      { expiresIn: '1h' } // Tiempo de expiración
+      { email: req.session.email },
+      secretKey,
+      { expiresIn: '1h' }
     );
+
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: false,
+      sameSite: 'strict',
+      maxAge: 3600000,
+    });
     console.log("Usuario autenticado:", req.session.email);
-    return res.json({ message: 'Código Correcto', token });
+    return res.json({ message: 'Código Correcto' });
   }
   res.status(400).json({ message: 'Código inválido' });
 };
 
 exports.logout = (req, res) => {
   // Destruir la sesión
-  req.session.destroy((err) => {
-    if (err) {
-      console.error('Error al destruir la sesión:', err);
-      return res.status(500).json({ message: 'Error al cerrar sesión' });
-    }
-    res.json({ message: 'Sesión cerrada' });
-  });
+  res.clearCookie('token'); // Eliminar la cookie
+  res.json({ message: 'Sesión cerrada' });
 };
 
 exports.getSolicitudes = async (req, res) => {
@@ -76,4 +97,35 @@ exports.getSolicitudes = async (req, res) => {
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
+};
+
+exports.checkAuth = (req, res) => {
+  const token = req.cookies.token; // Obtener el token de la cookie
+
+  if (!token) {
+    return res.status(401).json({ authenticated: false, message: 'Token no proporcionado.' });
+  }
+
+  jwt.verify(token, secretKey, (err, user) => {
+    if (err) {
+      return res.status(403).json({ authenticated: false, message: 'Token inválido o expirado.' });
+    }
+    return res.json({ authenticated: true, user });
+  });
+};
+
+const generateOTP = () => {
+  const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'; // Letras mayúsculas y números
+  let otp = '';
+  for (let i = 0; i < 6; i++) {
+    const randomIndex = Math.floor(Math.random() * characters.length);
+    otp += characters[randomIndex];
+  }
+  return otp;
+};
+
+const calculateExpiryTime = () => {
+  const now = new Date();
+  const expiryTime = new Date(now.getTime() + 5 * 60 * 1000);
+  return expiryTime;
 };
